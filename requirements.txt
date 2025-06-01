@@ -1,0 +1,46 @@
+# Core dependencies for SmartRAG
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+gunicorn>=21.2.0
+
+# LLM and ML
+vllm>=0.2.7
+sentence-transformers>=2.2.2
+transformers>=4.35.0
+torch>=2.1.0
+tokenizers>=0.15.0
+
+# Vector stores
+faiss-cpu>=1.7.4
+pgvector>=0.2.4
+psycopg2-binary>=2.9.9
+
+# Caching and data
+redis>=5.0.1
+numpy>=1.24.0
+pandas>=2.1.0
+
+# Document processing
+pypdf>=3.17.0
+python-docx>=1.1.0
+python-multipart>=0.0.6
+aiofiles>=23.2.1
+
+# Configuration
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+structlog>=23.2.0
+tenacity>=8.2.3
+
+# Monitoring
+opentelemetry-api>=1.21.0
+opentelemetry-sdk>=1.21.0
+opentelemetry-instrumentation-fastapi>=0.42b0
+opentelemetry-instrumentation-redis>=0.42b0
+opentelemetry-exporter-prometheus>=1.12.0rc1
+prometheus-client>=0.19.0
+
+# HTTP clients
+httpx>=0.25.2
+aiohttp>=3.9.0
