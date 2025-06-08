@@ -1,0 +1,240 @@
+# Horizontal Pod Autoscaler for SmartRAG API
+# Automatically scales pods based on CPU, memory, and custom metrics
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: smartrag-api-hpa
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: hpa
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: smartrag
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: smartrag-api
+  
+  minReplicas: 2
+  maxReplicas: 10
+  
+  metrics:
+  # CPU utilization scaling
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  
+  # Memory utilization scaling
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  
+  # Custom metrics scaling (requires metrics server and custom metrics API)
+  - type: Pods
+    pods:
+      metric:
+        name: requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"
+  
+  - type: Pods
+    pods:
+      metric:
+        name: response_time_95th_percentile
+      target:
+        type: AverageValue
+        averageValue: "500m"  # 500ms
+  
+  # External metrics (e.g., from monitoring system)
+  - type: External
+    external:
+      metric:
+        name: queue_depth
+        selector:
+          matchLabels:
+            queue: smartrag-processing
+      target:
+        type: Value
+        value: "10"
+  
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 5 minutes
+      policies:
+      - type: Percent
+        value: 10  # Scale down by max 10% of current replicas
+        periodSeconds: 60
+      - type: Pods
+        value: 1   # Scale down by max 1 pod
+        periodSeconds: 60
+      selectPolicy: Min  # Use the policy that results in fewer pods removed
+    
+    scaleUp:
+      stabilizationWindowSeconds: 60   # 1 minute
+      policies:
+      - type: Percent
+        value: 50  # Scale up by max 50% of current replicas
+        periodSeconds: 60
+      - type: Pods
+        value: 2   # Scale up by max 2 pods
+        periodSeconds: 60
+      selectPolicy: Max  # Use the policy that results in more pods added
+
+---
+# Vertical Pod Autoscaler for SmartRAG API (optional)
+# Automatically adjusts CPU and memory requests/limits
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: smartrag-api-vpa
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: smartrag-api
+  
+  updatePolicy:
+    updateMode: "Auto"  # Options: "Off", "Initial", "Recreation", "Auto"
+  
+  resourcePolicy:
+    containerPolicies:
+    - containerName: smartrag-api
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 4000m
+        memory: 8Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+    
+    - containerName: log-collector
+      mode: "Off"  # Don't autoscale sidecar containers
+
+---
+# HPA for Qdrant (if needed)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: qdrant-hpa
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: qdrant
+    app.kubernetes.io/component: hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: qdrant
+  
+  minReplicas: 1
+  maxReplicas: 3
+  
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85
+  
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600  # 10 minutes (database scaling should be conservative)
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 300  # 5 minutes between scale down events
+    
+    scaleUp:
+      stabilizationWindowSeconds: 120  # 2 minutes
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 120
+
+---
+# HPA for Redis (if clustering is enabled)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: redis-hpa
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: redis
+  
+  minReplicas: 1
+  maxReplicas: 3
+  
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+  
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  
+  # Custom Redis metrics
+  - type: Pods
+    pods:
+      metric:
+        name: redis_connected_clients
+      target:
+        type: AverageValue
+        averageValue: "100"
+  
+  - type: Pods
+    pods:
+      metric:
+        name: redis_memory_usage_percentage
+      target:
+        type: AverageValue
+        averageValue: "70"
+  
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 180
+    
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60

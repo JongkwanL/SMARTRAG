@@ -1,0 +1,529 @@
+# Deployment for SmartRAG API application
+# This deployment manages the main application pods with high availability
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smartrag-api
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: smartrag
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: smartrag
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: smartrag
+        app.kubernetes.io/component: api
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: smartrag-service-account
+      imagePullSecrets:
+      - name: registry-secret
+      
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      
+      # Init container for migrations and setup
+      initContainers:
+      - name: init-migrations
+        image: smartrag:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-m", "src.core.migrations"]
+        envFrom:
+        - configMapRef:
+            name: smartrag-config
+        - secretRef:
+            name: smartrag-secrets
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: app-logs
+          mountPath: /app/logs
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+      
+      containers:
+      # Main application container
+      - name: smartrag-api
+        image: smartrag:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        
+        # Environment variables
+        envFrom:
+        - configMapRef:
+            name: smartrag-config
+        - secretRef:
+            name: smartrag-secrets
+        
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 12
+        
+        # Resource limits and requests
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        
+        # Volume mounts
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: app-logs
+          mountPath: /app/logs
+        - name: app-cache
+          mountPath: /app/cache
+        - name: model-cache
+          mountPath: /app/model_cache
+        - name: logging-config
+          mountPath: /app/config/logging.yaml
+          subPath: logging.yaml
+          readOnly: true
+        
+        # Lifecycle hooks
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 15"]
+      
+      # Sidecar container for log collection (optional)
+      - name: log-collector
+        image: fluent/fluent-bit:2.2.0
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: app-logs
+          mountPath: /app/logs
+          readOnly: true
+        - name: fluent-bit-config
+          mountPath: /fluent-bit/etc
+          readOnly: true
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+      
+      # Volumes
+      volumes:
+      - name: tmp-volume
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: app-logs
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: app-cache
+        emptyDir:
+          sizeLimit: 2Gi
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache-pvc
+      - name: logging-config
+        configMap:
+          name: smartrag-logging-config
+      - name: fluent-bit-config
+        configMap:
+          name: fluent-bit-config
+      
+      # Node selection and affinity
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: smartrag
+                  app.kubernetes.io/component: api
+              topologyKey: kubernetes.io/hostname
+      
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+
+---
+# Deployment for Qdrant vector database
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: qdrant
+    app.kubernetes.io/component: database
+    app.kubernetes.io/version: "1.7.4"
+    app.kubernetes.io/part-of: smartrag
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: qdrant
+      app.kubernetes.io/component: database
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: qdrant
+        app.kubernetes.io/component: database
+        app.kubernetes.io/version: "1.7.4"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      
+      containers:
+      - name: qdrant
+        image: qdrant/qdrant:v1.7.4
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 6333
+          protocol: TCP
+        - name: grpc
+          containerPort: 6334
+          protocol: TCP
+        
+        env:
+        - name: QDRANT__SERVICE__HTTP_PORT
+          value: "6333"
+        - name: QDRANT__SERVICE__GRPC_PORT
+          value: "6334"
+        - name: QDRANT__LOG_LEVEL
+          value: "INFO"
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # Qdrant needs to write to storage
+          capabilities:
+            drop:
+            - ALL
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        
+        volumeMounts:
+        - name: qdrant-storage
+          mountPath: /qdrant/storage
+      
+      volumes:
+      - name: qdrant-storage
+        persistentVolumeClaim:
+          claimName: qdrant-storage-pvc
+
+---
+# Deployment for Redis cache
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/version: "7.2"
+    app.kubernetes.io/part-of: smartrag
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/component: cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/version: "7.2"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+      
+      containers:
+      - name: redis
+        image: redis:7.2-alpine
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: redis
+          containerPort: 6379
+          protocol: TCP
+        
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --maxmemory
+        - "1gb"
+        - --maxmemory-policy
+        - "allkeys-lru"
+        - --save
+        - "900 1"
+        - --save
+        - "300 10"
+        - --save
+        - "60 10000"
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # Redis needs to write to data directory
+          capabilities:
+            drop:
+            - ALL
+        
+        livenessProbe:
+          tcpSocket:
+            port: redis
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        resources:
+          limits:
+            cpu: 500m
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-data-pvc
+
+---
+# Deployment for vLLM service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: llm
+    app.kubernetes.io/version: "latest"
+    app.kubernetes.io/part-of: smartrag
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+      app.kubernetes.io/component: llm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm
+        app.kubernetes.io/component: llm
+        app.kubernetes.io/version: "latest"
+    spec:
+      # vLLM requires more privileged access for GPU
+      securityContext:
+        runAsUser: 0  # vLLM container runs as root
+      
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        
+        env:
+        - name: MODEL_NAME
+          value: "microsoft/DialoGPT-medium"
+        - name: TENSOR_PARALLEL_SIZE
+          value: "1"
+        - name: GPU_MEMORY_UTILIZATION
+          value: "0.8"
+        - name: MAX_MODEL_LEN
+          value: "2048"
+        - name: SERVED_MODEL_NAME
+          value: "gpt-3.5-turbo"
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 120
+          periodSeconds: 60
+          timeoutSeconds: 30
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 30
+          failureThreshold: 3
+        
+        # Resource requests for GPU nodes
+        resources:
+          limits:
+            cpu: 4000m
+            memory: 8Gi
+            nvidia.com/gpu: 1  # Uncomment if using GPU
+          requests:
+            cpu: 2000m
+            memory: 4Gi
+            nvidia.com/gpu: 1  # Uncomment if using GPU
+        
+        volumeMounts:
+        - name: model-cache
+          mountPath: /root/.cache/huggingface
+      
+      volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache-pvc
+      
+      # Node selector for GPU nodes (if using GPU)
+      nodeSelector:
+        accelerator: nvidia-tesla-k80  # Adjust based on your GPU nodes
+      
+      # Tolerations for GPU nodes
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule

@@ -1,0 +1,377 @@
+# Monitoring configuration for SmartRAG
+# Includes ServiceMonitor for Prometheus, PodMonitor, and PrometheusRule
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: smartrag-api-monitor
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: smartrag
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: smartrag
+      app.kubernetes.io/component: api-service
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scheme: http
+    honorLabels: true
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'go_.*'
+      action: drop
+    - sourceLabels: [__name__]
+      regex: 'promhttp_.*'
+      action: drop
+  namespaceSelector:
+    matchNames:
+    - smartrag
+
+---
+# PodMonitor for direct pod monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: smartrag-pods-monitor
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: pod-monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: smartrag
+  podMetricsEndpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - smartrag
+
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: smartrag-alerts
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: alerts
+spec:
+  groups:
+  - name: smartrag.rules
+    interval: 30s
+    rules:
+    
+    # High-level application health
+    - alert: SmartRAGDown
+      expr: up{job="smartrag-api-monitor"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: smartrag
+      annotations:
+        summary: "SmartRAG API is down"
+        description: "SmartRAG API has been down for more than 1 minute"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/api-down"
+    
+    # High error rate
+    - alert: SmartRAGHighErrorRate
+      expr: |
+        (
+          sum(rate(http_requests_total{job="smartrag-api-monitor", status=~"5.."}[5m])) /
+          sum(rate(http_requests_total{job="smartrag-api-monitor"}[5m]))
+        ) > 0.05
+      for: 5m
+      labels:
+        severity: warning
+        service: smartrag
+      annotations:
+        summary: "High error rate in SmartRAG API"
+        description: "Error rate is {{ $value | humanizePercentage }} for 5 minutes"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/high-error-rate"
+    
+    # High response time
+    - alert: SmartRAGHighLatency
+      expr: |
+        histogram_quantile(0.95, 
+          sum(rate(http_request_duration_seconds_bucket{job="smartrag-api-monitor"}[5m])) by (le)
+        ) > 2
+      for: 5m
+      labels:
+        severity: warning
+        service: smartrag
+      annotations:
+        summary: "High latency in SmartRAG API"
+        description: "95th percentile latency is {{ $value }}s for 5 minutes"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/high-latency"
+    
+    # Memory usage
+    - alert: SmartRAGHighMemoryUsage
+      expr: |
+        (
+          container_memory_usage_bytes{pod=~"smartrag-api-.*"} /
+          container_spec_memory_limit_bytes{pod=~"smartrag-api-.*"}
+        ) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        service: smartrag
+      annotations:
+        summary: "High memory usage in SmartRAG API"
+        description: "Memory usage is {{ $value | humanizePercentage }} for 5 minutes"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/high-memory"
+    
+    # CPU usage
+    - alert: SmartRAGHighCPUUsage
+      expr: |
+        (
+          rate(container_cpu_usage_seconds_total{pod=~"smartrag-api-.*"}[5m]) /
+          container_spec_cpu_quota{pod=~"smartrag-api-.*"} * container_spec_cpu_period{pod=~"smartrag-api-.*"}
+        ) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        service: smartrag
+      annotations:
+        summary: "High CPU usage in SmartRAG API"
+        description: "CPU usage is {{ $value | humanizePercentage }} for 5 minutes"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/high-cpu"
+    
+    # Database connectivity
+    - alert: QdrantDown
+      expr: up{job="qdrant-monitor"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: qdrant
+      annotations:
+        summary: "Qdrant vector database is down"
+        description: "Qdrant has been down for more than 1 minute"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/qdrant-down"
+    
+    - alert: RedisDown
+      expr: up{job="redis-monitor"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: redis
+      annotations:
+        summary: "Redis cache is down"
+        description: "Redis has been down for more than 1 minute"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/redis-down"
+    
+    # Cache hit rate
+    - alert: SmartRAGLowCacheHitRate
+      expr: smartrag_cache_hit_rate < 0.5
+      for: 10m
+      labels:
+        severity: warning
+        service: smartrag
+      annotations:
+        summary: "Low cache hit rate in SmartRAG"
+        description: "Cache hit rate is {{ $value | humanizePercentage }} for 10 minutes"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/low-cache-hit-rate"
+    
+    # Search performance
+    - alert: SmartRAGSlowSearches
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(smartrag_search_duration_seconds_bucket[5m])) by (le)
+        ) > 5
+      for: 5m
+      labels:
+        severity: warning
+        service: smartrag
+      annotations:
+        summary: "Slow search performance in SmartRAG"
+        description: "95th percentile search time is {{ $value }}s for 5 minutes"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/slow-searches"
+    
+    # Pod restart rate
+    - alert: SmartRAGHighRestartRate
+      expr: |
+        increase(kube_pod_container_status_restarts_total{pod=~"smartrag-api-.*"}[1h]) > 5
+      for: 0m
+      labels:
+        severity: warning
+        service: smartrag
+      annotations:
+        summary: "High restart rate for SmartRAG pods"
+        description: "Pod {{ $labels.pod }} has restarted {{ $value }} times in the last hour"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/high-restart-rate"
+    
+    # Disk usage
+    - alert: SmartRAGHighDiskUsage
+      expr: |
+        (
+          kubelet_volume_stats_used_bytes{persistentvolumeclaim=~".*smartrag.*"} /
+          kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~".*smartrag.*"}
+        ) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        service: smartrag
+      annotations:
+        summary: "High disk usage for SmartRAG PVC"
+        description: "Disk usage is {{ $value | humanizePercentage }} for PVC {{ $labels.persistentvolumeclaim }}"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/high-disk-usage"
+  
+  - name: smartrag.business.rules
+    interval: 60s
+    rules:
+    
+    # Business metrics
+    - alert: SmartRAGLowThroughput
+      expr: |
+        sum(rate(smartrag_requests_total[5m])) < 10
+      for: 10m
+      labels:
+        severity: warning
+        service: smartrag
+        type: business
+      annotations:
+        summary: "Low request throughput in SmartRAG"
+        description: "Request rate is {{ $value }} requests/second for 10 minutes"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/low-throughput"
+    
+    - alert: SmartRAGHighDocumentProcessingTime
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(smartrag_document_processing_duration_seconds_bucket[5m])) by (le)
+        ) > 30
+      for: 5m
+      labels:
+        severity: warning
+        service: smartrag
+        type: business
+      annotations:
+        summary: "High document processing time"
+        description: "95th percentile document processing time is {{ $value }}s"
+        runbook_url: "https://smartrag.readthedocs.io/runbooks/slow-document-processing"
+
+---
+# ServiceMonitor for Qdrant
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: qdrant-monitor
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: qdrant
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: qdrant
+      app.kubernetes.io/component: database-service
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - smartrag
+
+---
+# ServiceMonitor for Redis
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-monitor
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/component: cache-service
+  endpoints:
+  - port: redis
+    interval: 30s
+    path: /metrics
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - smartrag
+
+---
+# Grafana Dashboard ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smartrag-dashboard
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: dashboard
+    grafana_dashboard: "1"
+data:
+  smartrag-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "SmartRAG Overview",
+        "tags": ["smartrag"],
+        "style": "dark",
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{job=\"smartrag-api-monitor\"}[5m]))",
+                "legendFormat": "Requests/sec"
+              }
+            ],
+            "yAxes": [{"unit": "reqps"}]
+          },
+          {
+            "id": 2,
+            "title": "Error Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{job=\"smartrag-api-monitor\", status=~\"5..\"}[5m])) / sum(rate(http_requests_total{job=\"smartrag-api-monitor\"}[5m]))",
+                "legendFormat": "Error Rate"
+              }
+            ],
+            "yAxes": [{"unit": "percentunit"}]
+          },
+          {
+            "id": 3,
+            "title": "Response Time",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"smartrag-api-monitor\"}[5m])) by (le))",
+                "legendFormat": "95th percentile"
+              },
+              {
+                "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"smartrag-api-monitor\"}[5m])) by (le))",
+                "legendFormat": "50th percentile"
+              }
+            ],
+            "yAxes": [{"unit": "s"}]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }

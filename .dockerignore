@@ -1,0 +1,194 @@
+# Docker ignore file for SmartRAG
+# Exclude unnecessary files from Docker build context
+
+# ================================
+# Version control
+# ================================
+.git
+.gitignore
+.gitattributes
+.github/
+
+# ================================
+# Python
+# ================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ================================
+# Virtual environments
+# ================================
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ================================
+# IDE and editors
+# ================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ================================
+# Testing
+# ================================
+.tox/
+.coverage
+.pytest_cache/
+.hypothesis/
+htmlcov/
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.coverage.*
+
+# ================================
+# Documentation
+# ================================
+docs/_build/
+.readthedocs.yml
+
+# ================================
+# Jupyter Notebook
+# ================================
+.ipynb_checkpoints/
+*.ipynb
+
+# ================================
+# Environment files
+# ================================
+.env*
+!.env.example
+
+# ================================
+# Logs and databases
+# ================================
+*.log
+*.db
+*.sqlite3
+
+# ================================
+# Docker
+# ================================
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# ================================
+# CI/CD
+# ================================
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+
+# ================================
+# Package management
+# ================================
+poetry.lock
+requirements*.txt
+Pipfile
+Pipfile.lock
+
+# ================================
+# Application specific
+# ================================
+data/
+logs/
+cache/
+temp/
+uploads/
+downloads/
+
+# Model files (too large for container)
+models/
+*.bin
+*.safetensors
+*.gguf
+
+# ================================
+# Kubernetes
+# ================================
+k8s/
+kubernetes/
+helm/
+
+# ================================
+# Monitoring
+# ================================
+monitoring/
+
+# ================================
+# Scripts
+# ================================
+scripts/deploy.sh
+scripts/backup.sh
+
+# ================================
+# Certificates and secrets
+# ================================
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+ssl/
+
+# ================================
+# Temporary files
+# ================================
+*.tmp
+*.temp
+tmp/
+temp/
+
+# ================================
+# OS generated files
+# ================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ================================
+# README and documentation
+# ================================
+README*.md
+CHANGELOG*.md
+CONTRIBUTING*.md
+LICENSE*
+SECURITY*.md

@@ -1,0 +1,126 @@
+# Kustomization file for SmartRAG Kubernetes deployment
+# This file orchestrates the deployment of all SmartRAG components
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: smartrag
+  annotations:
+    config.kubernetes.io/local-config: "true"
+
+# Namespace for all resources
+namespace: smartrag
+
+# Resources to include in deployment
+resources:
+- namespace.yaml
+- secrets.yaml
+- configmap.yaml
+- rbac.yaml
+- pvc.yaml
+- deployment.yaml
+- service.yaml
+- ingress.yaml
+- hpa.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: smartrag
+  app.kubernetes.io/version: "1.0.0"
+  app.kubernetes.io/managed-by: kustomize
+  environment: production
+
+# Common annotations
+commonAnnotations:
+  contact: "team@smartrag.com"
+  documentation: "https://smartrag.readthedocs.io"
+  repository: "https://github.com/smartrag/smartrag"
+
+# Image transformations
+images:
+- name: smartrag
+  newTag: "1.0.0"
+- name: qdrant/qdrant
+  newTag: "v1.7.4"
+- name: redis
+  newTag: "7.2-alpine"
+- name: vllm/vllm-openai
+  newTag: "latest"
+
+# ConfigMap generator for additional configs
+configMapGenerator:
+- name: fluent-bit-config
+  files:
+  - configs/fluent-bit.conf
+- name: prometheus-config
+  files:
+  - configs/prometheus.yml
+
+# Secret generator for additional secrets
+secretGenerator:
+- name: staging-auth-secret
+  type: kubernetes.io/basic-auth
+  literals:
+  - username=admin
+  - password=staging-password
+- name: admin-auth-secret
+  type: kubernetes.io/basic-auth
+  literals:
+  - username=admin
+  - password=admin-password
+
+# Patches for different environments
+patchesStrategicMerge:
+- patches/production-patches.yaml
+
+# JSON patches
+patchesJson6902:
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: smartrag-api
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 3
+    - op: add
+      path: /spec/template/metadata/annotations/deployment.kubernetes.io~1revision
+      value: "1"
+
+# Replica count patches
+replicas:
+- name: smartrag-api
+  count: 3
+- name: qdrant
+  count: 1
+- name: redis
+  count: 1
+- name: vllm
+  count: 1
+
+# Variables for substitution
+vars:
+- name: SMARTRAG_VERSION
+  objref:
+    kind: ConfigMap
+    name: smartrag-config
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.VERSION
+- name: NAMESPACE
+  objref:
+    kind: Namespace
+    name: smartrag
+    apiVersion: v1
+  fieldref:
+    fieldpath: metadata.name
+
+# Generators for additional resources
+generators:
+- monitoring-generator.yaml
+
+# Validators
+validators:
+- security-validator.yaml

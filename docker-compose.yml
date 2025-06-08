@@ -1,0 +1,412 @@
+# Docker Compose configuration for SmartRAG development and production
+# This file provides a complete development environment with all dependencies
+
+version: '3.8'
+
+services:
+  # ================================
+  # Core Application Services
+  # ================================
+  
+  # SmartRAG API Service
+  smartrag-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+      args:
+        PYTHON_VERSION: 3.11-slim
+        APP_USER: smartrag
+    image: smartrag:latest
+    container_name: smartrag-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Application settings
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - LOG_LEVEL=debug
+      
+      # API settings
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_WORKERS=1
+      - ENABLE_DOCS=true
+      - ENABLE_AUTH=false
+      - ENABLE_RATE_LIMITING=true
+      
+      # Database connections
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - QDRANT_COLLECTION_NAME=smartrag_docs
+      - QDRANT_DISTANCE_METRIC=cosine
+      
+      # Redis cache
+      - REDIS_ENABLED=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=
+      - REDIS_MAX_CONNECTIONS=20
+      - REDIS_SERIALIZER=pickle
+      - REDIS_KEY_PREFIX=smartrag:
+      
+      # vLLM settings
+      - VLLM_BASE_URL=http://vllm:8000
+      - VLLM_API_KEY=
+      - VLLM_MODEL=microsoft/DialoGPT-medium
+      - VLLM_TIMEOUT=30.0
+      - VLLM_MAX_RETRIES=3
+      
+      # Embedding settings
+      - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - EMBEDDING_DEVICE=cpu
+      - EMBEDDING_BATCH_SIZE=32
+      - EMBEDDING_MAX_LENGTH=512
+      
+      # Processing settings
+      - CHUNK_SIZE=1000
+      - CHUNK_OVERLAP=200
+      - MAX_CHUNK_SIZE=2000
+      
+      # Search settings
+      - SEARCH_VECTOR_WEIGHT=0.7
+      - SEARCH_BM25_WEIGHT=0.3
+      - SEARCH_MMR_LAMBDA=0.5
+      
+      # Cache settings
+      - CACHE_MAX_SIZE=10000
+      - CACHE_TTL=3600
+      
+      # Rate limiting
+      - RATE_LIMIT_PER_MINUTE=100
+      - RATE_LIMIT_PER_HOUR=1000
+      - RATE_LIMIT_BURST=10
+      
+      # Security
+      - JWT_SECRET_KEY=your-secret-key-change-in-production
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRATION_HOURS=24
+      
+      # CORS
+      - CORS_ORIGINS=["http://localhost:3000","http://localhost:8080"]
+      
+      # Monitoring
+      - LOG_REQUEST_BODY=false
+      - LOG_HEADERS=false
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - model_cache:/app/model_cache
+    depends_on:
+      - qdrant
+      - redis
+      - vllm
+    networks:
+      - smartrag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ================================
+  # Vector Database (Qdrant)
+  # ================================
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: smartrag-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - smartrag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ================================
+  # Cache Database (Redis)
+  # ================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: smartrag-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - smartrag-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ================================
+  # LLM Service (vLLM)
+  # ================================
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: smartrag-vllm
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      - MODEL_NAME=microsoft/DialoGPT-medium
+      - TENSOR_PARALLEL_SIZE=1
+      - GPU_MEMORY_UTILIZATION=0.8
+      - MAX_MODEL_LEN=2048
+      - SERVED_MODEL_NAME=gpt-3.5-turbo
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+    networks:
+      - smartrag-network
+    # Uncomment for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+
+  # ================================
+  # Monitoring Services
+  # ================================
+  
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: smartrag-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - smartrag-network
+    profiles:
+      - monitoring
+
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: smartrag-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - smartrag-network
+    profiles:
+      - monitoring
+
+  # ================================
+  # Development Tools
+  # ================================
+  
+  # Jupyter notebook for experimentation
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    image: smartrag:latest
+    container_name: smartrag-jupyter
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''
+    volumes:
+      - ./notebooks:/app/notebooks
+      - ./src:/app/src
+      - ./data:/app/data
+      - model_cache:/app/model_cache
+    depends_on:
+      - qdrant
+      - redis
+    networks:
+      - smartrag-network
+    profiles:
+      - development
+
+  # pgAdmin for database management (if using PostgreSQL)
+  pgadmin:
+    image: dpage/pgadmin4:8.0
+    container_name: smartrag-pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@smartrag.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - smartrag-network
+    profiles:
+      - development
+
+# ================================
+# Networks
+# ================================
+networks:
+  smartrag-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ================================
+# Volumes
+# ================================
+volumes:
+  qdrant_data:
+    driver: local
+  redis_data:
+    driver: local
+  vllm_cache:
+    driver: local
+  model_cache:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+# ================================
+# Additional compose configurations
+# ================================
+
+# Production configuration override
+# Use: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+---
+# docker-compose.prod.yml (referenced in docs)
+version: '3.8'
+
+services:
+  smartrag-api:
+    build:
+      target: production
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - LOG_LEVEL=info
+      - API_WORKERS=4
+      - ENABLE_AUTH=true
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # Load balancer for production
+  nginx:
+    image: nginx:alpine
+    container_name: smartrag-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - smartrag-api
+    networks:
+      - smartrag-network
+
+# Testing configuration
+# Use: docker-compose -f docker-compose.yml -f docker-compose.test.yml up
+---
+# docker-compose.test.yml (referenced in docs)  
+version: '3.8'
+
+services:
+  smartrag-test:
+    build:
+      target: testing
+    environment:
+      - ENVIRONMENT=test
+      - QDRANT_HOST=qdrant-test
+      - REDIS_HOST=redis-test
+    volumes:
+      - ./tests:/app/tests
+      - ./src:/app/src
+      - test_coverage:/app/coverage
+    depends_on:
+      - qdrant-test
+      - redis-test
+    networks:
+      - smartrag-network
+
+  qdrant-test:
+    image: qdrant/qdrant:v1.7.4
+    container_name: smartrag-qdrant-test
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+    volumes:
+      - qdrant_test_data:/qdrant/storage
+    networks:
+      - smartrag-network
+
+  redis-test:
+    image: redis:7.2-alpine
+    container_name: smartrag-redis-test
+    command: redis-server --appendonly no
+    networks:
+      - smartrag-network
+
+volumes:
+  test_coverage:
+    driver: local
+  qdrant_test_data:
+    driver: local

@@ -1,0 +1,114 @@
+# Persistent Volume Claims for SmartRAG application
+# These PVCs provide persistent storage for data that needs to survive pod restarts
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qdrant-storage-pvc
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: qdrant
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: smartrag
+  annotations:
+    volume.beta.kubernetes.io/storage-class: "ssd-retain"
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: ssd-retain
+  volumeMode: Filesystem
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data-pvc
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: smartrag
+  annotations:
+    volume.beta.kubernetes.io/storage-class: "ssd-retain"
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: ssd-retain
+  volumeMode: Filesystem
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-pvc
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: model-cache
+    app.kubernetes.io/part-of: smartrag
+  annotations:
+    volume.beta.kubernetes.io/storage-class: "ssd-retain"
+spec:
+  accessModes:
+  - ReadWriteMany  # Multiple pods can read the same models
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: ssd-retain
+  volumeMode: Filesystem
+
+---
+# Storage Classes for different performance requirements
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ssd-retain
+  labels:
+    app.kubernetes.io/part-of: smartrag
+parameters:
+  type: gp3
+  iops: "3000"
+  throughput: "125"
+  encrypted: "true"
+provisioner: ebs.csi.aws.com
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ssd-delete
+  labels:
+    app.kubernetes.io/part-of: smartrag
+parameters:
+  type: gp3
+  iops: "3000"
+  throughput: "125"
+  encrypted: "true"
+provisioner: ebs.csi.aws.com
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard-retain
+  labels:
+    app.kubernetes.io/part-of: smartrag
+parameters:
+  type: gp3
+  encrypted: "true"
+provisioner: ebs.csi.aws.com
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer

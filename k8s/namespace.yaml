@@ -1,0 +1,64 @@
+# Kubernetes namespace for SmartRAG application
+# This isolates all SmartRAG resources in a dedicated namespace
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: namespace
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: kubectl
+  annotations:
+    description: "SmartRAG - Advanced Retrieval-Augmented Generation System"
+    contact: "team@smartrag.com"
+---
+# Resource quota to limit resource usage
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: smartrag-quota
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: quota
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "20"
+    persistentvolumeclaims: "10"
+    services: "10"
+    secrets: "20"
+    configmaps: "20"
+---
+# Network policy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: smartrag-network-policy
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: smartrag
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+  egress:
+  - {} # Allow all egress for external API calls

@@ -1,0 +1,192 @@
+# Services for SmartRAG application components
+# These services provide stable network endpoints for pods
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: smartrag-api-service
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: api-service
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: smartrag
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb  # For AWS NLB
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: http
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: api
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: metrics
+    protocol: TCP
+
+---
+# Headless service for StatefulSet (if needed)
+apiVersion: v1
+kind: Service
+metadata:
+  name: smartrag-api-headless
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: api-headless
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: api
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+    protocol: TCP
+
+---
+# Service for Qdrant vector database
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-service
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: qdrant
+    app.kubernetes.io/component: database-service
+    app.kubernetes.io/version: "1.7.4"
+    app.kubernetes.io/part-of: smartrag
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: qdrant
+    app.kubernetes.io/component: database
+  ports:
+  - name: http
+    port: 6333
+    targetPort: http
+    protocol: TCP
+  - name: grpc
+    port: 6334
+    targetPort: grpc
+    protocol: TCP
+
+---
+# Service for Redis cache
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache-service
+    app.kubernetes.io/version: "7.2"
+    app.kubernetes.io/part-of: smartrag
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: redis
+    protocol: TCP
+
+---
+# Service for vLLM
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-service
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: llm-service
+    app.kubernetes.io/version: "latest"
+    app.kubernetes.io/part-of: smartrag
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: llm
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+    protocol: TCP
+
+---
+# LoadBalancer service for external access (optional)
+apiVersion: v1
+kind: Service
+metadata:
+  name: smartrag-external
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: external-service
+  annotations:
+    # AWS Load Balancer annotations
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: http
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: /health
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8000"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: http
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval: "30"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold: "2"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold: "3"
+    
+    # GCP Load Balancer annotations
+    cloud.google.com/neg: '{"ingress": true}'
+    cloud.google.com/backend-config: '{"default": "smartrag-backend-config"}'
+    
+    # Azure Load Balancer annotations
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: /health
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: api
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: http
+    protocol: TCP
+
+---
+# NodePort service for development/testing
+apiVersion: v1
+kind: Service
+metadata:
+  name: smartrag-nodeport
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: nodeport-service
+  annotations:
+    description: "NodePort service for development and testing"
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: api
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+    nodePort: 30800
+    protocol: TCP

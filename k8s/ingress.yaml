@@ -1,0 +1,261 @@
+# Ingress configuration for SmartRAG application
+# Provides external access with SSL termination and routing rules
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: smartrag-ingress
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: smartrag
+  annotations:
+    # Ingress class
+    kubernetes.io/ingress.class: nginx
+    
+    # SSL and certificates
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
+    
+    # Rate limiting
+    nginx.ingress.kubernetes.io/rate-limit-connections: "10"
+    nginx.ingress.kubernetes.io/rate-limit-requests-per-minute: "100"
+    nginx.ingress.kubernetes.io/rate-limit-burst-multiplier: "5"
+    
+    # Request size limits
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/client-max-body-size: "10m"
+    
+    # Timeouts
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    
+    # CORS
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://smartrag.example.com,https://app.smartrag.example.com"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET,POST,PUT,DELETE,OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+    nginx.ingress.kubernetes.io/cors-max-age: "86400"
+    
+    # Security headers
+    nginx.ingress.kubernetes.io/server-snippet: |
+      add_header X-Frame-Options DENY always;
+      add_header X-Content-Type-Options nosniff always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    
+    # Load balancing
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+    nginx.ingress.kubernetes.io/load-balance: "ewma"
+    
+    # Health checks
+    nginx.ingress.kubernetes.io/health-check-path: "/health"
+    nginx.ingress.kubernetes.io/health-check-method: "GET"
+    nginx.ingress.kubernetes.io/health-check-interval: "30s"
+    
+    # Monitoring
+    nginx.ingress.kubernetes.io/enable-opentracing: "true"
+    nginx.ingress.kubernetes.io/enable-access-log: "true"
+    
+    # Custom configuration
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      # Custom rate limiting for search endpoints
+      location ~* /api/v1/(search|rag) {
+          limit_req zone=search burst=5 nodelay;
+          limit_req_status 429;
+      }
+      
+      # Cache static content
+      location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg)$ {
+          expires 1y;
+          add_header Cache-Control "public, immutable";
+      }
+      
+      # Security for sensitive endpoints
+      location ~* /api/v1/(documents|admin) {
+          # Add additional authentication if needed
+          access_log /var/log/nginx/sensitive.log;
+      }
+
+spec:
+  ingressClassName: nginx
+  
+  tls:
+  - hosts:
+    - api.smartrag.example.com
+    - smartrag.example.com
+    secretName: smartrag-tls-secret
+  
+  rules:
+  # Main API domain
+  - host: api.smartrag.example.com
+    http:
+      paths:
+      # Health check endpoint (no auth required)
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: smartrag-api-service
+            port:
+              number: 8000
+      
+      # API endpoints
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: smartrag-api-service
+            port:
+              number: 8000
+      
+      # Metrics endpoint (restricted access)
+      - path: /metrics
+        pathType: Exact
+        backend:
+          service:
+            name: smartrag-api-service
+            port:
+              number: 9090
+      
+      # Root path
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: smartrag-api-service
+            port:
+              number: 8000
+  
+  # Documentation domain (optional)
+  - host: docs.smartrag.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: smartrag-api-service
+            port:
+              number: 8000
+
+---
+# Ingress for development/staging environment
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: smartrag-staging-ingress
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: staging-ingress
+    environment: staging
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    
+    # More relaxed rate limiting for staging
+    nginx.ingress.kubernetes.io/rate-limit-requests-per-minute: "500"
+    
+    # Enable debugging features
+    nginx.ingress.kubernetes.io/enable-access-log: "true"
+    nginx.ingress.kubernetes.io/access-log-path: "/var/log/nginx/staging-access.log"
+    
+    # Basic auth for staging (optional)
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: staging-auth-secret
+    nginx.ingress.kubernetes.io/auth-realm: "SmartRAG Staging Environment"
+
+spec:
+  ingressClassName: nginx
+  
+  tls:
+  - hosts:
+    - staging.smartrag.example.com
+    secretName: smartrag-staging-tls-secret
+  
+  rules:
+  - host: staging.smartrag.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: smartrag-api-service
+            port:
+              number: 8000
+
+---
+# Internal ingress for admin/monitoring tools
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: smartrag-admin-ingress
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: admin-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx-internal  # Internal ingress class
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    
+    # Strict authentication for admin access
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: admin-auth-secret
+    nginx.ingress.kubernetes.io/auth-realm: "SmartRAG Admin Access"
+    
+    # IP whitelist for admin access
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    
+    # Additional security headers for admin
+    nginx.ingress.kubernetes.io/server-snippet: |
+      add_header X-Frame-Options DENY always;
+      add_header X-Content-Type-Options nosniff always;
+      add_header Content-Security-Policy "default-src 'self'" always;
+
+spec:
+  ingressClassName: nginx-internal
+  
+  tls:
+  - hosts:
+    - admin.smartrag.internal
+    secretName: smartrag-admin-tls-secret
+  
+  rules:
+  - host: admin.smartrag.internal
+    http:
+      paths:
+      # Metrics endpoint
+      - path: /metrics
+        pathType: Exact
+        backend:
+          service:
+            name: smartrag-api-service
+            port:
+              number: 9090
+      
+      # Admin API endpoints
+      - path: /api/v1/admin
+        pathType: Prefix
+        backend:
+          service:
+            name: smartrag-api-service
+            port:
+              number: 8000
+      
+      # Health check
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: smartrag-api-service
+            port:
+              number: 8000

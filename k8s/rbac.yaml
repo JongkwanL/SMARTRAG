@@ -1,0 +1,253 @@
+# RBAC configuration for SmartRAG application
+# Defines service accounts, roles, and permissions
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: smartrag-service-account
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: service-account
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    # AWS IAM role annotation (if using IRSA)
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/smartrag-pod-role
+    
+    # GCP service account annotation (if using Workload Identity)
+    iam.gke.io/gcp-service-account: smartrag@PROJECT_ID.iam.gserviceaccount.com
+automountServiceAccountToken: true
+
+---
+# Role for SmartRAG application
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: smartrag
+  name: smartrag-role
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: role
+rules:
+# ConfigMaps access
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+
+# Secrets access (limited)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames: ["smartrag-secrets", "registry-secret"]
+
+# Pod information access
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+
+# Service information access
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch"]
+
+# Events (for debugging)
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list", "watch", "create"]
+
+# Endpoints access
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "list", "watch"]
+
+# PersistentVolumeClaims access
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding for SmartRAG application
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: smartrag-role-binding
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: role-binding
+subjects:
+- kind: ServiceAccount
+  name: smartrag-service-account
+  namespace: smartrag
+roleRef:
+  kind: Role
+  name: smartrag-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRole for cluster-wide permissions (if needed)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: smartrag-cluster-role
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: cluster-role
+rules:
+# Node information access (for metrics)
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+
+# Metrics access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["nodes", "pods"]
+  verbs: ["get", "list"]
+
+# Custom resources (if using custom metrics)
+- apiGroups: ["custom.metrics.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+
+---
+# ClusterRoleBinding for cluster-wide permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: smartrag-cluster-role-binding
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: cluster-role-binding
+subjects:
+- kind: ServiceAccount
+  name: smartrag-service-account
+  namespace: smartrag
+roleRef:
+  kind: ClusterRole
+  name: smartrag-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Service account for monitoring components
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: smartrag-monitoring-sa
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: monitoring-sa
+automountServiceAccountToken: true
+
+---
+# Role for monitoring components
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: smartrag-monitoring-role
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: monitoring-role
+rules:
+# Prometheus scraping permissions
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: ["extensions"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+
+# Metrics access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["nodes", "pods"]
+  verbs: ["get", "list"]
+
+---
+# RoleBinding for monitoring
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: smartrag-monitoring-binding
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: monitoring-binding
+subjects:
+- kind: ServiceAccount
+  name: smartrag-monitoring-sa
+  namespace: smartrag
+roleRef:
+  kind: ClusterRole
+  name: smartrag-monitoring-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Service account for database operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: smartrag-db-sa
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: db-sa
+automountServiceAccountToken: true
+
+---
+# Role for database operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: smartrag
+  name: smartrag-db-role
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: db-role
+rules:
+# PVC management for databases
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+# ConfigMaps for database configuration
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+# Secrets for database credentials
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+
+# Pod management for database operations
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Service management
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+# RoleBinding for database operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: smartrag-db-binding
+  namespace: smartrag
+  labels:
+    app.kubernetes.io/name: smartrag
+    app.kubernetes.io/component: db-binding
+subjects:
+- kind: ServiceAccount
+  name: smartrag-db-sa
+  namespace: smartrag
+roleRef:
+  kind: Role
+  name: smartrag-db-role
+  apiGroup: rbac.authorization.k8s.io
