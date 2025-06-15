@@ -1,0 +1,135 @@
+# Prometheus configuration for SmartRAG monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "smartrag_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # SmartRAG API metrics
+  - job_name: 'smartrag-api'
+    static_configs:
+      - targets: ['smartrag-api:9090']
+    scrape_interval: 10s
+    metrics_path: /metrics
+    scheme: http
+    scrape_timeout: 5s
+    params:
+      format: ['prometheus']
+
+  # vLLM server metrics
+  - job_name: 'vllm-server'
+    static_configs:
+      - targets: ['vllm-server:8001']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    scheme: http
+
+  # Redis metrics
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:9121']
+    scrape_interval: 30s
+
+  # PostgreSQL metrics (if using pgvector)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+
+  # Node metrics for infrastructure monitoring
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+
+  # Kubernetes metrics (when deployed on K8s)
+  - job_name: 'kubernetes-apiservers'
+    kubernetes_sd_configs:
+    - role: endpoints
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+      action: keep
+      regex: default;kubernetes;https
+
+  - job_name: 'kubernetes-nodes'
+    kubernetes_sd_configs:
+    - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+    - action: labelmap
+      regex: __meta_kubernetes_node_label_(.+)
+
+  - job_name: 'kubernetes-pods'
+    kubernetes_sd_configs:
+    - role: pod
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+      action: keep
+      regex: true
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+      action: replace
+      target_label: __metrics_path__
+      regex: (.+)
+
+# Storage configuration
+storage:
+  tsdb:
+    path: /prometheus/data
+    retention.time: 30d
+    retention.size: 50GB
+    wal-compression: true
+
+# Recording rules for SmartRAG
+recording_rules:
+  - name: smartrag_aggregations
+    rules:
+      # Request rate
+      - record: smartrag:request_rate_5m
+        expr: rate(smartrag_requests_total[5m])
+      
+      # Error rate
+      - record: smartrag:error_rate_5m
+        expr: rate(smartrag_requests_total{status=~"4..|5.."}[5m])
+      
+      # Response time percentiles
+      - record: smartrag:response_time_p95_5m
+        expr: histogram_quantile(0.95, rate(smartrag_request_duration_seconds_bucket[5m]))
+      
+      - record: smartrag:response_time_p50_5m
+        expr: histogram_quantile(0.50, rate(smartrag_request_duration_seconds_bucket[5m]))
+      
+      # Cache hit rate
+      - record: smartrag:cache_hit_rate_5m
+        expr: rate(smartrag_cache_hits_total[5m]) / rate(smartrag_cache_requests_total[5m])
+      
+      # Vector store size
+      - record: smartrag:vector_store_size
+        expr: smartrag_vector_store_documents_total
+      
+      # Embedding generation rate
+      - record: smartrag:embedding_generation_rate_5m
+        expr: rate(smartrag_embeddings_generated_total[5m])
+      
+      # LLM request rate
+      - record: smartrag:llm_request_rate_5m
+        expr: rate(smartrag_llm_requests_total[5m])
+      
+      # Token usage rate
+      - record: smartrag:token_usage_rate_5m
+        expr: rate(smartrag_llm_tokens_total[5m])

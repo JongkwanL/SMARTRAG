@@ -1,0 +1,191 @@
+# SmartRAG alerting rules for Prometheus
+
+groups:
+  - name: smartrag_alerts
+    rules:
+      # High error rate alert
+      - alert: SmartRAGHighErrorRate
+        expr: smartrag:error_rate_5m > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG API error rate is high"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # Critical error rate alert
+      - alert: SmartRAGCriticalErrorRate
+        expr: smartrag:error_rate_5m > 0.20
+        for: 1m
+        labels:
+          severity: critical
+          service: smartrag
+        annotations:
+          summary: "SmartRAG API error rate is critical"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # High response time alert
+      - alert: SmartRAGHighResponseTime
+        expr: smartrag:response_time_p95_5m > 2.0
+        for: 3m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG API response time is high"
+          description: "95th percentile response time is {{ $value }}s for the last 5 minutes"
+
+      # Critical response time alert
+      - alert: SmartRAGCriticalResponseTime
+        expr: smartrag:response_time_p95_5m > 5.0
+        for: 1m
+        labels:
+          severity: critical
+          service: smartrag
+        annotations:
+          summary: "SmartRAG API response time is critical"
+          description: "95th percentile response time is {{ $value }}s for the last 5 minutes"
+
+      # Low cache hit rate alert
+      - alert: SmartRAGLowCacheHitRate
+        expr: smartrag:cache_hit_rate_5m < 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG cache hit rate is low"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # API service down
+      - alert: SmartRAGAPIDown
+        expr: up{job="smartrag-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: smartrag
+        annotations:
+          summary: "SmartRAG API is down"
+          description: "SmartRAG API has been down for more than 1 minute"
+
+      # vLLM service down
+      - alert: VLLMServiceDown
+        expr: up{job="vllm-server"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: vllm
+        annotations:
+          summary: "vLLM service is down"
+          description: "vLLM service has been down for more than 1 minute"
+
+      # Redis service down
+      - alert: RedisServiceDown
+        expr: up{job="redis"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis service is down"
+          description: "Redis service has been down for more than 30 seconds"
+
+      # High memory usage
+      - alert: SmartRAGHighMemoryUsage
+        expr: (smartrag_memory_usage_bytes / smartrag_memory_limit_bytes) > 0.8
+        for: 2m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG memory usage is high"
+          description: "Memory usage is {{ $value | humanizePercentage }} of limit"
+
+      # Critical memory usage
+      - alert: SmartRAGCriticalMemoryUsage
+        expr: (smartrag_memory_usage_bytes / smartrag_memory_limit_bytes) > 0.95
+        for: 30s
+        labels:
+          severity: critical
+          service: smartrag
+        annotations:
+          summary: "SmartRAG memory usage is critical"
+          description: "Memory usage is {{ $value | humanizePercentage }} of limit"
+
+      # High CPU usage
+      - alert: SmartRAGHighCPUUsage
+        expr: rate(smartrag_cpu_usage_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG CPU usage is high"
+          description: "CPU usage is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # Vector store size alert
+      - alert: SmartRAGVectorStoreFull
+        expr: smartrag:vector_store_size > 1000000
+        for: 1m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG vector store is getting large"
+          description: "Vector store contains {{ $value }} documents"
+
+      # LLM rate limit alert
+      - alert: SmartRAGLLMRateLimited
+        expr: increase(smartrag_llm_rate_limit_errors_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG is hitting LLM rate limits"
+          description: "{{ $value }} rate limit errors in the last 5 minutes"
+
+      # Embedding generation failure
+      - alert: SmartRAGEmbeddingFailures
+        expr: increase(smartrag_embedding_generation_errors_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG embedding generation is failing"
+          description: "{{ $value }} embedding generation errors in the last 5 minutes"
+
+      # Document processing failure
+      - alert: SmartRAGDocumentProcessingFailures
+        expr: increase(smartrag_document_processing_errors_total[5m]) > 3
+        for: 2m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG document processing is failing"
+          description: "{{ $value }} document processing errors in the last 5 minutes"
+
+      # Low disk space
+      - alert: SmartRAGLowDiskSpace
+        expr: (smartrag_disk_usage_bytes / smartrag_disk_total_bytes) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: smartrag
+        annotations:
+          summary: "SmartRAG disk space is low"
+          description: "Disk usage is {{ $value | humanizePercentage }} of total space"
+
+      # Critical disk space
+      - alert: SmartRAGCriticalDiskSpace
+        expr: (smartrag_disk_usage_bytes / smartrag_disk_total_bytes) > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          service: smartrag
+        annotations:
+          summary: "SmartRAG disk space is critical"
+          description: "Disk usage is {{ $value | humanizePercentage }} of total space"
