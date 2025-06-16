@@ -94,4 +94,4 @@ pytest tests/ --cov=src
 - [Performance Tuning](./docs/performance.md)
 
 ## 📄 라이선스
-MIT License`c
+MIT License
