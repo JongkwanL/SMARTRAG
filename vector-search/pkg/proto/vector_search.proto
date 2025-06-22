@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package vector_search;
+
+option go_package = "github.com/smartrag/vector-search/pkg/proto";
+
+// Vector search service definition
+service VectorSearchService {
+    // Search for similar vectors
+    rpc Search(SearchRequest) returns (SearchResponse);
+    
+    // Add vectors to the index
+    rpc AddVectors(AddVectorsRequest) returns (AddVectorsResponse);
+    
+    // Delete vectors from the index
+    rpc DeleteVectors(DeleteVectorsRequest) returns (DeleteVectorsResponse);
+    
+    // Get index statistics
+    rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+    
+    // Health check
+    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// Vector representation
+message Vector {
+    string id = 1;
+    repeated float values = 2;
+    map<string, string> metadata = 3;
+}
+
+// Search request
+message SearchRequest {
+    repeated float query_vector = 1;
+    int32 top_k = 2;
+    float threshold = 3;
+    map<string, string> filters = 4;
+    bool include_metadata = 5;
+}
+
+// Search response
+message SearchResponse {
+    repeated SearchResult results = 1;
+    int64 total_searched = 2;
+    float search_time_ms = 3;
+}
+
+// Individual search result
+message SearchResult {
+    string id = 1;
+    float score = 2;
+    map<string, string> metadata = 3;
+}
+
+// Add vectors request
+message AddVectorsRequest {
+    repeated Vector vectors = 1;
+}
+
+// Add vectors response
+message AddVectorsResponse {
+    int32 added_count = 1;
+    repeated string failed_ids = 2;
+}
+
+// Delete vectors request
+message DeleteVectorsRequest {
+    repeated string ids = 1;
+}
+
+// Delete vectors response
+message DeleteVectorsResponse {
+    int32 deleted_count = 1;
+    repeated string not_found_ids = 2;
+}
+
+// Get stats request
+message GetStatsRequest {
+}
+
+// Get stats response
+message GetStatsResponse {
+    int64 total_vectors = 1;
+    int32 dimension = 2;
+    float index_size_mb = 3;
+    int64 search_count = 4;
+    float avg_search_time_ms = 5;
+}
+
+// Health check request
+message HealthCheckRequest {
+}
+
+// Health check response
+message HealthCheckResponse {
+    string status = 1;
+    int64 timestamp = 2;
+}

@@ -19,7 +19,6 @@ import (
 	"smartrag-gateway/internal/middleware"
 	"smartrag-gateway/internal/proxy"
 	"smartrag-gateway/internal/ratelimit"
-	"smartrag-gateway/internal/websocket"
 )
 
 func main() {
@@ -31,19 +30,32 @@ func main() {
 	cfg := config.Load()
 
 	// Initialize Redis for rate limiting and caching
-	redisClient := cache.NewRedisClient(cfg.Redis)
+	redisClient := cache.NewRedisClient(cfg.Redis.Address, cfg.Redis.Password, cfg.Redis.DB)
+
+	// Test Redis connection
+	if err := redisClient.Ping(context.Background()); err != nil {
+		logger.Fatal("Failed to connect to Redis", zap.Error(err))
+	}
 
 	// Initialize rate limiter
-	rateLimiter := ratelimit.NewRedisRateLimiter(redisClient, cfg.RateLimit)
+	rateLimiter := ratelimit.NewRedisRateLimiter(
+		redisClient.GetClient(),
+		cfg.RateLimit.RequestsPerMinute,
+		time.Duration(cfg.RateLimit.WindowSize)*time.Second,
+	)
 
 	// Initialize auth service
-	authService := auth.NewJWTAuth(cfg.Auth.SecretKey)
+	authService := auth.NewJWTAuth(cfg.Auth.SecretKey, cfg.Auth.TokenTTL)
 
 	// Initialize HTTP proxy
-	httpProxy := proxy.NewHTTPProxy(cfg.Backend)
-
-	// Initialize WebSocket manager
-	wsManager := websocket.NewManager(logger)
+	httpProxy, err := proxy.NewHandler(
+		cfg.Backend.URL,
+		time.Duration(cfg.Backend.ResponseTimeout)*time.Second,
+		logger,
+	)
+	if err != nil {
+		logger.Fatal("Failed to create proxy handler", zap.Error(err))
+	}
 
 	// Setup Gin router
 	router := gin.New()
@@ -53,15 +65,9 @@ func main() {
 	router.Use(middleware.Metrics())
 
 	// Health check endpoint
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"status":    "healthy",
-			"timestamp": time.Now().Unix(),
-			"service":   "smartrag-gateway",
-		})
-	})
+	router.GET("/health", httpProxy.HealthCheck)
 
-	// Metrics endpoint
+	// Metrics endpoint  
 	router.GET("/metrics", gin.WrapH(middleware.PrometheusHandler()))
 
 	// API routes with middleware
@@ -85,22 +91,22 @@ func main() {
 			// Document ingestion (with caching)
 			protected.POST("/ingest", 
 				middleware.Cache(redisClient, 300), // 5 min cache
-				httpProxy.ProxyHTTP,
+				httpProxy.ProxyRequest,
 			)
 
 			// Query endpoint (with aggressive caching)
 			protected.POST("/query",
 				middleware.Cache(redisClient, 60), // 1 min cache
-				httpProxy.ProxyHTTP,
+				httpProxy.ProxyRequest,
 			)
 
 			// All other endpoints proxy to Python backend
-			protected.Any("/*path", httpProxy.ProxyHTTP)
+			protected.Any("/*path", httpProxy.ProxyRequest)
 		}
 	}
 
-	// WebSocket endpoints for real-time streaming
-	router.GET("/ws/stream", wsManager.HandleConnection)
+	// WebSocket endpoints for real-time streaming (TODO: implement WebSocket manager)
+	// router.GET("/ws/stream", wsManager.HandleConnection)
 
 	// Start server
 	srv := &http.Server{
