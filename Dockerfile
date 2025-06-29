@@ -39,28 +39,21 @@ RUN groupadd -g ${APP_GID} ${APP_USER} && \
     useradd -u ${APP_UID} -g ${APP_GID} -m -s /bin/bash ${APP_USER}
 
 # ================================
-# Builder stage: Install Python dependencies
+# Builder stage: Install Python dependencies with uv
 # ================================
 FROM base as builder
 
-# Install Poetry for dependency management
-ENV POETRY_VERSION=1.7.1
-RUN pip install poetry==${POETRY_VERSION}
-
-# Configure Poetry
-ENV POETRY_NO_INTERACTION=1 \
-    POETRY_VENV_IN_PROJECT=1 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+# Install uv for fast dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 # Create app directory
 WORKDIR /app
 
 # Copy dependency files
-COPY pyproject.toml poetry.lock* ./
+COPY pyproject.toml uv.lock* ./
 
-# Install dependencies
-RUN poetry install --only=main --no-root && \
-    rm -rf $POETRY_CACHE_DIR
+# Install dependencies with uv
+RUN uv sync --frozen --no-dev
 
 # ================================
 # Development stage: Full development environment
@@ -87,8 +80,9 @@ WORKDIR /app
 # Copy source code
 COPY --chown=${APP_USER}:${APP_USER} . .
 
-# Install package in development mode
-RUN pip install -e .
+# Install package in development mode with uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+RUN uv pip install -e .
 
 # Change to non-root user
 USER ${APP_USER}
@@ -117,8 +111,9 @@ WORKDIR /app
 # Copy source code with proper ownership
 COPY --chown=${APP_USER}:${APP_USER} . .
 
-# Install package
-RUN pip install .
+# Install package with uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+RUN uv pip install .
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/data /app/cache && \
@@ -157,8 +152,9 @@ CMD ["python", "-m", "gunicorn", "src.api.main:app", \
 # ================================
 FROM development as testing
 
-# Install test dependencies
-RUN poetry install --with=test,dev
+# Install test dependencies with uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+RUN uv sync --frozen
 
 # Set test environment
 ENV ENVIRONMENT=test

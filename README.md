@@ -87,6 +87,96 @@ pytest tests/ --cov=src
 - [ ] A/B 테스팅 프레임워크
 - [ ] 멀티테넌시 지원
 
+## 🚀 설치 및 실행
+
+### 사전 요구사항
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (Python 패키지 관리자)
+- Docker & Docker Compose
+- Redis
+- PostgreSQL (pgvector 확장)
+
+### 로컬 개발 환경 설정
+
+1. **저장소 클론**
+```bash
+git clone <repository-url>
+cd SmartRAG
+```
+
+2. **uv 설치** (아직 설치하지 않은 경우)
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+3. **의존성 설치**
+```bash
+# 프로덕션 의존성만 설치
+uv sync --no-dev
+
+# 개발 의존성 포함 설치
+uv sync
+```
+
+4. **환경 변수 설정**
+```bash
+cp .env.example .env
+# .env 파일을 편집하여 필요한 설정 입력
+```
+
+5. **애플리케이션 실행**
+```bash
+# 개발 서버 실행
+uv run uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+
+# 또는 개발 스크립트 사용
+uv run python -m src.api.main
+```
+
+### Docker를 통한 실행
+
+1. **개발 환경**
+```bash
+docker-compose up --build dev
+```
+
+2. **프로덕션 환경**
+```bash
+docker-compose up --build prod
+```
+
+### uv 주요 명령어
+
+```bash
+# 의존성 추가
+uv add fastapi
+uv add --dev pytest
+
+# 의존성 제거  
+uv remove package-name
+
+# 가상환경에서 명령 실행
+uv run python script.py
+uv run pytest
+
+# 프로젝트 빌드
+uv build
+
+# 코드 포맷팅
+uv run black src/
+uv run isort src/
+
+# 타입 검사
+uv run mypy src/
+
+# 테스트 실행
+uv run pytest tests/
+```
+
 ## 📚 문서
 - [API Documentation](./docs/api.md)
 - [Architecture Guide](./docs/architecture.md)
